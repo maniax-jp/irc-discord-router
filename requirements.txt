@@ -1,0 +1,4 @@
+discord.py>=2.4.0
+irc>=32.0.0
+python-dotenv
+pytest
