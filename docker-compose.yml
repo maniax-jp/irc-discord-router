@@ -2,7 +2,6 @@ version: '3.8'
 
 services:
   bot:
-    build: .
     image: maniaxjp/irc-discord-router
     container_name: irc-discord-router
     restart: always
