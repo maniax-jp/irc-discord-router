@@ -1,4 +1,4 @@
-discord.py>=2.4.0
-irc>=32.0.0
+discord.py
+irc
 python-dotenv
 pytest

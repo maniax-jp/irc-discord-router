@@ -1,0 +1,12 @@
+version: '3.8'
+
+services:
+  bot:
+    build: .
+    image: maniaxjp/irc-discord-router
+    container_name: irc-discord-router
+    restart: always
+    env_file:
+      - .env
+    # If you want to see logs in real-time, you can use:
+    # docker compose logs -f
