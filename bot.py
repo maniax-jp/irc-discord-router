@@ -18,17 +18,24 @@ load_dotenv()
 # 設定値を環境変数から取得
 IRC_SERVER = os.getenv("IRC_SERVER")
 IRC_PORT = int(os.getenv("IRC_PORT", 6667))
-IRC_CHANNEL = os.getenv("IRC_CHANNEL")
 IRC_USER = os.getenv("IRC_USER")
-# 初期 NICK は後で動的に決定するため、ここではデフォルト値として保持
+# チャンネルペアの設定 (形式: "#chan1:id1,#chan2:id2")
+CHANNEL_PAIRS_STR = os.getenv("CHANNEL_PAIRS", "")
 DEFAULT_NICK = os.getenv("IRC_NICK", "BOT_DISCORD")
 IRC_USER_REALNAME = "BOT_DISCORD"
-DISCORD_CHANNEL_ID = os.getenv("DISCORD_CHANNEL_ID")
 DISCORD_BOT_TOKEN = os.getenv("DISCORD_BOT_TOKEN")
+
+# チャンネルペアをパースしてリストに格納 [(irc_channel, discord_channel_id), ...]
+CHANNEL_PAIRS = []
+if CHANNEL_PAIRS_STR:
+    for pair in CHANNEL_PAIRS_STR.split(","):
+        if ":" in pair:
+            irc_chan, disc_id = pair.split(":", 1)
+            CHANNEL_PAIRS.append((irc_chan, disc_id))
 
 # グローバル変数
 discord_client = None
-discord_channel = None
+discord_channel_map = {} # discord_id -> discord_channel_object
 irc_client = None
 
 class IRCClient(SimpleIRCClient):
@@ -67,44 +74,68 @@ class IRCClient(SimpleIRCClient):
             print(f"[無視] IRC ボット自身のメッセージを無視")
             return
 
-        # Discord 側に転送
-        print(f"Discord への転送：{message_content}")
-        if self.bot.discord_channel:
-            # Discord は非同期なので、別のタスクとしてスケジュールする
-            asyncio.run_coroutine_threadsafe(
-                self.bot.discord_channel.send(f"{sender_nick}: {message_content}"),
-                self.bot.discord_client.loop
-            )
-            print(f"IRC → Discord: {message_content}")
+        # この IRC チャンネルに対応する Discord チャンネルを探す
+        discord_id = None
+        for irc_chan, d_id in CHANNEL_PAIRS:
+            if irc_chan == event.target:
+                discord_id = d_id
+                break
+
+        if discord_id:
+            # Discord チャンネルオブジェクトを取得
+            channel = self.bot.discord_channel_map.get(discord_id)
+            if not channel:
+                # キャッシュになければ取得を試みる
+                channel = self.bot.discord_client.get_channel(int(discord_id))
+                if channel:
+                    self.bot.discord_channel_map[discord_id] = channel
+
+            if channel:
+                # Discord 側に転送
+                print(f"Discord への転送：{message_content}")
+                asyncio.run_coroutine_threadsafe(
+                    channel.send(f"{sender_nick}: {message_content}"),
+                    self.bot.discord_client.loop
+                )
+                print(f"IRC → Discord: {message_content}")
+            else:
+                print(f"[エラー] Discord チャンネル {discord_id} が見つかりません")
+        else:
+            print(f"[無視] 管理外の IRC チャンネル {event.target} からのメッセージです")
 
     def on_join(self, connection, event):
         """チャンネル参加時の処理"""
         print(f"IRC チャンネルに参加しました：{event.target}")
-        # IRC に起動メッセージを送信
-        connection.privmsg(IRC_CHANNEL, "[BOT] IRC-Discord ボットが起動しました")
-        print(f"IRC に起動メッセージを送信しました")
+        # 参加したチャンネルが管理対象なら、起動メッセージを送信
+        for irc_chan, d_id in CHANNEL_PAIRS:
+            if irc_chan == event.target:
+                connection.privmsg(irc_chan, "[BOT] IRC-Discord ボットが起動しました")
+                print(f"IRC チャンネル {irc_chan} に起動メッセージを送信しました")
+                break
 
 class Bot:
     def __init__(self):
         self.irc_client = IRCClient(self)
         self.discord_client = None
-        self.discord_channel = None
-        self.irc_channel = IRC_CHANNEL
+        self.discord_channel_map = {} # discord_id -> discord_channel_object
         # 動的に決定されるため、初期値は candidate の最初
         self.irc_nick = IRCClient(self).nick_candidates[0]
 
     async def on_ready(self):
         """Discord 接続時の処理"""
         print(f"Discord ボットが起動しました：{self.discord_client.user}")
-        # チャンネルを取得
-        self.discord_channel = self.discord_client.get_channel(int(DISCORD_CHANNEL_ID))
-        if self.discord_channel:
-            print(f"チャンネル {DISCORD_CHANNEL_ID} を取得しました")
-            # 最初のメッセージを送信
-            await self.discord_channel.send(f"[BOT] IRC-Discord ボットが起動しました")
-            print(f"Discord に最初のメッセージを送信しました")
-        else:
-            print("チャンネルの取得に失敗しました")
+
+        # 全てのペアについて Discord チャンネルをキャッシュ
+        for irc_chan, discord_id in CHANNEL_PAIRS:
+            channel = self.discord_client.get_channel(int(discord_id))
+            if channel:
+                self.discord_channel_map[discord_id] = channel
+                print(f"チャンネル {discord_id} を取得しました")
+                # 最初のメッセージを送信
+                await channel.send(f"[BOT] IRC-Discord ボットが起動しました")
+                print(f"Discord チャンネル {discord_id} に起動メッセージを送信しました")
+            else:
+                print(f"チャンネル {discord_id} の取得に失敗しました")
 
     async def on_message(self, message):
         """Discord メッセージ受信時の処理"""
@@ -115,15 +146,21 @@ class Bot:
             print(f"[無視] Discord ボット自身のメッセージを無視")
             return
 
-        # 指定されたチャンネルのメッセージのみ処理
-        if message.channel.id != int(DISCORD_CHANNEL_ID):
-            print(f"チャンネル ID が一致しない：{message.channel.id} != {DISCORD_CHANNEL_ID}")
+        # 送信元の Discord チャンネルが管理対象ペアに含まれているか確認
+        irc_chan = None
+        for c_irc, c_disc in CHANNEL_PAIRS:
+            if str(message.channel.id) == c_disc:
+                irc_chan = c_irc
+                break
+
+        if not irc_chan:
+            print(f"[無視] 管理外の Discord チャンネル {message.channel.id} からのメッセージです")
             return
 
         # IRC 側に転送
         print(f"Discord → IRC への転送：{message.content}")
         if self.irc_client.connection:
-            self.irc_client.connection.privmsg(IRC_CHANNEL, f"{message.author.display_name}: {message.content}")
+            self.irc_client.connection.privmsg(irc_chan, f"{message.author.display_name}: {message.content}")
             print(f"Discord → IRC: {message.content}")
         else:
             print("IRC 接続が確立されていないため、転送に失敗しました")
@@ -150,12 +187,11 @@ class Bot:
 
         # ユーザー名(REALNAME)を設定
         if self.irc_client.connection:
-            # SimpleIRCClient では connect 時に自動的に USER コマンドが送られるが、
-            # ここでは明示的に REALNAME を設定したい場合、send_raw や専用メソッドが必要。
-            # シンプルに connection.user(user, name) を呼ぶ。
             self.irc_client.connection.user(IRC_USER or "discord_bot", IRC_USER_REALNAME)
-            self.irc_client.connection.join(IRC_CHANNEL)
-            print(f"IRC チャンネル {IRC_CHANNEL} に参加リクエストを送信しました")
+            # 全てのペアの IRC チャンネルに参加
+            for irc_chan, d_id in CHANNEL_PAIRS:
+                self.irc_client.connection.join(irc_chan)
+                print(f"IRC チャンネル {irc_chan} に参加リクエストを送信しました")
 
         # IRC リアクターを別スレッドで開始
         irc_thread = threading.Thread(target=self.run_irc_reactor, daemon=True)
