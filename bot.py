@@ -121,7 +121,7 @@ class IRCClient(irc.bot.SingleServerIRCBot):
 
         logger.info("IRC チャンネルに参加しました：%s", event.target)
         # 参加したチャンネルが管理対象なら、起動メッセージを送信
-        for irc_chan, d_id in CHANNEL_PAIRS:
+        for irc_chan, _ in CHANNEL_PAIRS:
             if irc_chan == event.target:
                 connection.privmsg(irc_chan, "[BOT] IRC-Discord ボットが起動しました")
                 logger.info("IRC チャンネル %s に起動メッセージを送信しました", irc_chan)
@@ -135,8 +135,6 @@ class Bot:
         self.irc_client = IRCClient(self, IRC_SERVER, IRC_PORT, DEFAULT_NICK[:1])
         self.discord_client = None
         self.discord_channel_map = {} # discord_id -> discord_channel_object
-        # 動的に決定されるため、初期値は candidate の最初
-        self.irc_nick = self.irc_client.nick_candidates[0]
 
     async def on_ready(self):
         """Discord 接続時の処理"""
