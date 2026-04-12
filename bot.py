@@ -8,8 +8,8 @@ import discord
 import asyncio
 import threading
 import os
+import irc.bot
 from dotenv import load_dotenv
-from irc.client import SimpleIRCClient
 # config import を削除し、直接 .env から読み込む形式に変更
 
 # .env ファイルから環境変数をロード
@@ -38,27 +38,32 @@ discord_client = None
 discord_channel_map = {} # discord_id -> discord_channel_object
 irc_client = None
 
-class IRCClient(SimpleIRCClient):
-    def __init__(self, bot):
-        super().__init__()
+class IRCClient(irc.bot.SingleServerIRCBot):
+    def __init__(self, bot, server, port, nickname):
+        super().__init__([(server, port)], nickname, "BOT_DISCORD")
         self.bot = bot
         # NICK 候補を生成: B, BO, BOT, BOT_, BOT_D, ...
         self.nick_candidates = [DEFAULT_NICK[:i] for i in range(1, len(DEFAULT_NICK) + 1)]
         self.current_nick_index = 0
 
-    def _handle_numeric(self, connection, event, *args):
-        """サーバーからの数値レスポンスを処理"""
-        # ERR_NICKNAMEINUSE (433) の処理
-        if event.numeric == 433:
-            self.current_nick_index += 1
-            if self.current_nick_index < len(self.nick_candidates):
-                new_nick = self.nick_candidates[self.current_nick_index]
-                print(f"[IRC] Nickname in use. Trying new nick: {new_nick}")
-                connection.nick(new_nick)
-            else:
-                print("[IRC] All nickname candidates exhausted.")
+    def on_nicknameinuse(self, c, e):
+        """ERR_NICKNAMEINUSE (433) の処理"""
+        self.current_nick_index += 1
+        if self.current_nick_index < len(self.nick_candidates):
+            new_nick = self.nick_candidates[self.current_nick_index]
+            print(f"[IRC] Nickname in use. Trying new nick: {new_nick}")
+            c.nick(new_nick)
+        else:
+            print("[IRC] All nickname candidates exhausted.")
 
-        super()._handle_numeric(connection, event, *args)
+    def on_welcome(self, c, e):
+        """サーバー接続成功時の処理"""
+        # ユーザー名(REALNAME)を設定
+        c.user(IRC_USER or "discord_bot", IRC_USER_REALNAME)
+        # 全てのペアの IRC チャンネルに参加
+        for irc_chan, d_id in CHANNEL_PAIRS:
+            c.join(irc_chan)
+            print(f"IRC チャンネル {irc_chan} に参加リクエストを送信しました")
 
     def on_pubmsg(self, connection, event):
         """チャンネルメッセージ受信時の処理"""
@@ -120,11 +125,11 @@ class IRCClient(SimpleIRCClient):
 
 class Bot:
     def __init__(self):
-        self.irc_client = IRCClient(self)
+        self.irc_client = IRCClient(self, IRC_SERVER, IRC_PORT, DEFAULT_NICK[:1])
         self.discord_client = None
         self.discord_channel_map = {} # discord_id -> discord_channel_object
         # 動的に決定されるため、初期値は candidate の最初
-        self.irc_nick = IRCClient(self).nick_candidates[0]
+        self.irc_nick = self.irc_client.nick_candidates[0]
 
     async def on_ready(self):
         """Discord 接続時の処理"""
@@ -173,7 +178,7 @@ class Bot:
     def run_irc_reactor(self):
         """IRC リアクターを別スレッドで実行する"""
         print("IRC リアクターを起動します...")
-        self.irc_client.reactor.process_forever()
+        self.irc_client.start()
 
     def run(self):
         # Discord クライアントの作成
@@ -184,19 +189,6 @@ class Bot:
         # Discord イベントの登録
         self.discord_client.event(self.on_ready)
         self.discord_client.event(self.on_message)
-
-        # IRC サーバーへの接続
-        # 最初の NICK 候補を使用
-        initial_nick = self.irc_client.nick_candidates[0]
-        self.irc_client.connect(IRC_SERVER, IRC_PORT, initial_nick)
-
-        # ユーザー名(REALNAME)を設定
-        if self.irc_client.connection:
-            self.irc_client.connection.user(IRC_USER or "discord_bot", IRC_USER_REALNAME)
-            # 全てのペアの IRC チャンネルに参加
-            for irc_chan, d_id in CHANNEL_PAIRS:
-                self.irc_client.connection.join(irc_chan)
-                print(f"IRC チャンネル {irc_chan} に参加リクエストを送信しました")
 
         # IRC リアクターを別スレッドで開始
         irc_thread = threading.Thread(target=self.run_irc_reactor, daemon=True)
