@@ -1,0 +1,13 @@
+version: '3.8'
+
+services:
+  irc-server:
+    image: lscr.io/linuxserver/ngircd:latest
+    container_name: irc-test-server
+    ports:
+      - "6667:6667"
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=UTC
+    restart: always
