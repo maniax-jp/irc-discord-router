@@ -101,14 +101,13 @@ class IRCClient(irc.bot.SingleServerIRCBot):
 
             if channel:
                 # Discord 側に転送
-                logger.info(f"Discord への転送：{message_content}")
+                logger.info(f"[転送] IRC → Discord：{message_content}")
                 asyncio.run_coroutine_threadsafe(
                     channel.send(f"{sender_nick}: {message_content}"),
                     self.bot.discord_client.loop
                 )
-                logger.info(f"IRC → Discord: {message_content}")
             else:
-                logger.error(f"[エラー] Discord チャンネル {discord_id} が見つかりません")
+                logger.error(f"Discord チャンネル {discord_id} が見つかりません")
         else:
             logger.info(f"[無視] 管理外の IRC チャンネル {event.target} からのメッセージです")
 
@@ -173,10 +172,9 @@ class Bot:
             return
 
         # IRC 側に転送
-        logger.info(f"Discord → IRC への転送：{message.content}")
+        logger.info(f"[転送] Discord → IRC：{message.content}")
         if self.irc_client.connection:
             self.irc_client.connection.privmsg(irc_chan, f"{message.author.display_name}: {message.content}")
-            logger.info(f"Discord → IRC: {message.content}")
         else:
             logger.error("IRC 接続が確立されていないため、転送に失敗しました")
 
