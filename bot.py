@@ -50,7 +50,7 @@ class IRCClient(irc.bot.SingleServerIRCBot):
         self.current_nick_index += 1
         if self.current_nick_index < len(self.nick_candidates):
             new_nick = self.nick_candidates[self.current_nick_index]
-            logger.info(f"[IRC] Nickname in use. Trying new nick: {new_nick}")
+            logger.info("[IRC] Nickname in use. Trying new nick: %s", new_nick)
             c.nick(new_nick)
         else:
             logger.error("[IRC] All nickname candidates exhausted.")
@@ -62,7 +62,7 @@ class IRCClient(irc.bot.SingleServerIRCBot):
         # 全てのペアの IRC チャンネルに参加
         for irc_chan, d_id in CHANNEL_PAIRS:
             c.join(irc_chan)
-            logger.info(f"IRC チャンネル {irc_chan} に参加リクエストを送信しました")
+            logger.info("IRC チャンネル %s に参加リクエストを送信しました", irc_chan)
 
     def on_pubmsg(self, connection, event):
         """チャンネルメッセージ受信時の処理"""
@@ -70,7 +70,7 @@ class IRCClient(irc.bot.SingleServerIRCBot):
         message_content = event.arguments[0]
         sender_nick = event.source.nick
 
-        logger.info(f"[受信] IRC チャンネル {event.target} からメッセージ：{message_content} (送信者：{sender_nick})")
+        logger.info("[受信] IRC チャンネル %s からメッセージ：%s (送信者：%s)", event.target, message_content, sender_nick)
 
         # ボット自身の現在の Nick を無視
         current_nick = self.nick_candidates[self.current_nick_index] if self.current_nick_index < len(self.nick_candidates) else DEFAULT_NICK
@@ -96,15 +96,15 @@ class IRCClient(irc.bot.SingleServerIRCBot):
 
             if channel:
                 # Discord 側に転送
-                logger.info(f"[転送] IRC → Discord：{message_content}")
+                logger.info("[転送] IRC → Discord：%s", message_content)
                 asyncio.run_coroutine_threadsafe(
                     channel.send(f"{sender_nick}: {message_content}"),
                     self.bot.discord_client.loop
                 )
             else:
-                logger.error(f"Discord チャンネル {discord_id} が見つかりません")
+                logger.error("Discord チャンネル %s が見つかりません", discord_id)
         else:
-            logger.info(f"[無視] 管理外の IRC チャンネル {event.target} からのメッセージです")
+            logger.info("[無視] 管理外の IRC チャンネル %s からのメッセージです", event.target)
 
     def on_join(self, connection, event):
         """チャンネル参加時の処理"""
@@ -113,12 +113,12 @@ class IRCClient(irc.bot.SingleServerIRCBot):
         if event.source.nick != current_nick:
             return
 
-        logger.info(f"IRC チャンネルに参加しました：{event.target}")
+        logger.info("IRC チャンネルに参加しました：%s", event.target)
         # 参加したチャンネルが管理対象なら、起動メッセージを送信
         for irc_chan, d_id in CHANNEL_PAIRS:
             if irc_chan == event.target:
                 connection.privmsg(irc_chan, "[BOT] IRC-Discord ボットが起動しました")
-                logger.info(f"IRC チャンネル {irc_chan} に起動メッセージを送信しました")
+                logger.info("IRC チャンネル %s に起動メッセージを送信しました", irc_chan)
                 break
 
 class Bot:
@@ -132,23 +132,23 @@ class Bot:
     async def on_ready(self):
         """Discord 接続時の処理"""
         if self.discord_client:
-            logger.info(f"Discord ボットが起動しました：{self.discord_client.user}")
+            logger.info("Discord ボットが起動しました：%s", self.discord_client.user)
 
         # 全てのペアについて Discord チャンネルをキャッシュ
         for _, discord_id in CHANNEL_PAIRS:
             channel = self.discord_client.get_channel(int(discord_id)) if self.discord_client else None
             if channel and isinstance(channel, (discord.TextChannel, discord.DMChannel, discord.GroupChannel)):
                 self.discord_channel_map[discord_id] = channel
-                logger.info(f"チャンネル {discord_id} を取得しました")
+                logger.info("チャンネル %s を取得しました", discord_id)
                 # 最初のメッセージを送信
                 await channel.send("[BOT] IRC-Discord ボットが起動しました")
-                logger.info(f"Discord チャンネル {discord_id} に起動メッセージを送信しました")
+                logger.info("Discord チャンネル %s に起動メッセージを送信しました", discord_id)
             else:
-                logger.error(f"チャンネル {discord_id} の取得に失敗しました")
+                logger.error("チャンネル %s の取得に失敗しました", discord_id)
 
     async def on_message(self, message):
         """Discord メッセージ受信時の処理"""
-        logger.info(f"[受信] Discord からメッセージ：{message.content} (作者：{message.author})")
+        logger.info("[受信] Discord からメッセージ：%s (作者：%s)", message.content, message.author)
 
         # 自分のメッセージは処理しない (IDで厳密に比較)
         if self.discord_client and self.discord_client.user and message.author.id == self.discord_client.user.id:
@@ -163,11 +163,11 @@ class Bot:
                 break
 
         if not irc_chan:
-            logger.info(f"[無視] 管理外の Discord チャンネル {message.channel.id} からのメッセージです")
+            logger.info("[無視] 管理外の Discord チャンネル %s からのメッセージです", message.channel.id)
             return
 
         # IRC 側に転送
-        logger.info(f"[転送] Discord → IRC：{message.content}")
+        logger.info("[転送] Discord → IRC：%s", message.content)
         if self.irc_client.connection:
             self.irc_client.connection.privmsg(irc_chan, f"{message.author.display_name}: {message.content}")
         else:
