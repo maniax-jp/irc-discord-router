@@ -38,6 +38,9 @@ if CHANNEL_PAIRS_STR:
             CHANNEL_PAIRS.append((irc_channel, disc_id))
 
 class IRCClient(irc.bot.SingleServerIRCBot):
+    """
+    IRC サーバーへの接続とメッセージの送受信を管理するクラス。
+    """
     def __init__(self, bot, server, port, nickname):
         super().__init__([(server, port)], nickname, "BOT_DISCORD")
         self.bot = bot
@@ -122,6 +125,9 @@ class IRCClient(irc.bot.SingleServerIRCBot):
                 break
 
 class Bot:
+    """
+    IRC と Discord 間でメッセージを双方向に転送するボット。
+    """
     def __init__(self):
         self.irc_client = IRCClient(self, IRC_SERVER, IRC_PORT, DEFAULT_NICK[:1])
         self.discord_client = None
@@ -179,6 +185,9 @@ class Bot:
         self.irc_client.start()
 
     def run(self):
+        """
+        DiscordボットとIRCリアクターを起動します。
+        """
         # Discord トークンの検証
         if not DISCORD_BOT_TOKEN:
             logger.error("DISCORD_BOT_TOKEN が設定されていません")
