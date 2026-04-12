@@ -4,12 +4,12 @@
 IRC-Discord 双方向転送ボット
 """
 
-import discord
 import asyncio
+import logging
 import threading
 import os
+import discord
 import irc.bot
-import logging
 from dotenv import load_dotenv
 
 # ログ設定を discord.utils.setup_logging で行う
@@ -21,7 +21,7 @@ load_dotenv()
 
 # 設定値を環境変数から取得
 IRC_SERVER = os.getenv("IRC_SERVER")
-IRC_PORT = int(os.getenv("IRC_PORT", 6667))
+IRC_PORT = int(os.getenv("IRC_PORT", "6667"))
 IRC_USER = os.getenv("IRC_USER")
 # チャンネルペアの設定 (形式: "#chan1:id1,#chan2:id2")
 CHANNEL_PAIRS_STR = os.getenv("CHANNEL_PAIRS", "")
@@ -34,13 +34,8 @@ CHANNEL_PAIRS = []
 if CHANNEL_PAIRS_STR:
     for pair in CHANNEL_PAIRS_STR.split(","):
         if ":" in pair:
-            irc_chan, disc_id = pair.split(":", 1)
-            CHANNEL_PAIRS.append((irc_chan, disc_id))
-
-# グローバル変数
-discord_client = None
-discord_channel_map = {} # discord_id -> discord_channel_object
-irc_client = None
+            irc_channel, disc_id = pair.split(":", 1)
+            CHANNEL_PAIRS.append((irc_channel, disc_id))
 
 class IRCClient(irc.bot.SingleServerIRCBot):
     def __init__(self, bot, server, port, nickname):
@@ -80,7 +75,7 @@ class IRCClient(irc.bot.SingleServerIRCBot):
         # ボット自身の現在の Nick を無視
         current_nick = self.nick_candidates[self.current_nick_index] if self.current_nick_index < len(self.nick_candidates) else DEFAULT_NICK
         if sender_nick == current_nick:
-            logger.info(f"[無視] IRC ボット自身のメッセージを無視")
+            logger.info("[無視] IRC ボット自身のメッセージを無視")
             return
 
         # この IRC チャンネルに対応する Discord チャンネルを探す
@@ -146,7 +141,7 @@ class Bot:
                 self.discord_channel_map[discord_id] = channel
                 logger.info(f"チャンネル {discord_id} を取得しました")
                 # 最初のメッセージを送信
-                await channel.send(f"[BOT] IRC-Discord ボットが起動しました")
+                await channel.send("[BOT] IRC-Discord ボットが起動しました")
                 logger.info(f"Discord チャンネル {discord_id} に起動メッセージを送信しました")
             else:
                 logger.error(f"チャンネル {discord_id} の取得に失敗しました")
@@ -157,7 +152,7 @@ class Bot:
 
         # 自分のメッセージは処理しない (IDで厳密に比較)
         if self.discord_client and self.discord_client.user and message.author.id == self.discord_client.user.id:
-            logger.info(f"[無視] Discord ボット自身のメッセージを無視")
+            logger.info("[無視] Discord ボット自身のメッセージを無視")
             return
 
         # 送信元の Discord チャンネルが管理対象ペアに含まれているか確認
@@ -206,5 +201,5 @@ class Bot:
         self.discord_client.run(DISCORD_BOT_TOKEN, log_handler=None)
 
 if __name__ == "__main__":
-    bot = Bot()
-    bot.run()
+    mybot = Bot()
+    mybot.run()
