@@ -45,3 +45,7 @@ env/
 # IDEs
 .vscode/
 .idea/
+
+# log
+*.log
+logs/
