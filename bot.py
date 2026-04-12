@@ -143,7 +143,7 @@ class Bot:
         # 全てのペアについて Discord チャンネルをキャッシュ
         for _, discord_id in CHANNEL_PAIRS:
             channel = self.discord_client.get_channel(int(discord_id)) if self.discord_client else None
-            if channel:
+            if channel and isinstance(channel, (discord.TextChannel, discord.DMChannel, discord.GroupChannel)):
                 self.discord_channel_map[discord_id] = channel
                 logger.info(f"チャンネル {discord_id} を取得しました")
                 # 最初のメッセージを送信
@@ -157,7 +157,7 @@ class Bot:
         logger.info(f"[受信] Discord からメッセージ：{message.content} (作者：{message.author})")
 
         # 自分のメッセージは処理しない (IDで厳密に比較)
-        if self.discord_client.user and message.author.id == self.discord_client.user.id:
+        if self.discord_client and self.discord_client.user and message.author.id == self.discord_client.user.id:
             logger.info(f"[無視] Discord ボット自身のメッセージを無視")
             return
 
@@ -186,6 +186,11 @@ class Bot:
         self.irc_client.start()
 
     def run(self):
+        # Discord トークンの検証
+        if not DISCORD_BOT_TOKEN:
+            logger.error("DISCORD_BOT_TOKEN が設定されていません")
+            return
+
         # Discord クライアントの作成
         intents = discord.Intents.default()
         intents.message_content = True
