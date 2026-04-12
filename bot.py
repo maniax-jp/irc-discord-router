@@ -63,7 +63,7 @@ class IRCClient(irc.bot.SingleServerIRCBot):
         # ユーザー名(REALNAME)を設定
         c.user(IRC_USER or "discord_bot", IRC_USER_REALNAME)
         # 全てのペアの IRC チャンネルに参加
-        for irc_chan, d_id in CHANNEL_PAIRS:
+        for irc_chan, _ in CHANNEL_PAIRS:
             c.join(irc_chan)
             logger.info("IRC チャンネル %s に参加リクエストを送信しました", irc_chan)
 
@@ -73,7 +73,10 @@ class IRCClient(irc.bot.SingleServerIRCBot):
         message_content = event.arguments[0]
         sender_nick = event.source.nick
 
-        logger.info("[受信] IRC チャンネル %s からメッセージ：%s (送信者：%s)", event.target, message_content, sender_nick)
+        logger.info(
+            "[受信] IRC チャンネル %s からメッセージ：%s (送信者：%s)",
+            event.target, message_content, sender_nick
+        )
 
         # ボット自身の現在の Nick を無視
         current_nick = self.nick_candidates[self.current_nick_index] if self.current_nick_index < len(self.nick_candidates) else DEFAULT_NICK
@@ -142,8 +145,15 @@ class Bot:
 
         # 全てのペアについて Discord チャンネルをキャッシュ
         for _, discord_id in CHANNEL_PAIRS:
-            channel = self.discord_client.get_channel(int(discord_id)) if self.discord_client else None
-            if channel and isinstance(channel, (discord.TextChannel, discord.DMChannel, discord.GroupChannel)):
+            channel = (
+                self.discord_client.get_channel(int(discord_id))
+                if self.discord_client else None
+            )
+            if (
+                channel and isinstance(
+                    channel, (discord.TextChannel, discord.DMChannel, discord.GroupChannel)
+                )
+            ):
                 self.discord_channel_map[discord_id] = channel
                 logger.info("チャンネル %s を取得しました", discord_id)
                 # 最初のメッセージを送信
@@ -157,7 +167,10 @@ class Bot:
         logger.info("[受信] Discord からメッセージ：%s (作者：%s)", message.content, message.author)
 
         # 自分のメッセージは処理しない (IDで厳密に比較)
-        if self.discord_client and self.discord_client.user and message.author.id == self.discord_client.user.id:
+        if (
+            self.discord_client and self.discord_client.user
+            and message.author.id == self.discord_client.user.id
+        ):
             logger.info("[無視] Discord ボット自身のメッセージを無視")
             return
 
@@ -175,7 +188,9 @@ class Bot:
         # IRC 側に転送
         logger.info("[転送] Discord → IRC：%s", message.content)
         if self.irc_client.connection:
-            self.irc_client.connection.privmsg(irc_chan, f"{message.author.display_name}: {message.content}")
+            self.irc_client.connection.privmsg(
+                irc_chan, f"{message.author.display_name}: {message.content}"
+            )
         else:
             logger.error("IRC 接続が確立されていないため、転送に失敗しました")
 
