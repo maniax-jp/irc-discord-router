@@ -105,6 +105,11 @@ class IRCClient(SimpleIRCClient):
 
     def on_join(self, connection, event):
         """チャンネル参加時の処理"""
+        # ボット自身の参加のみを処理
+        current_nick = self.nick_candidates[self.current_nick_index] if self.current_nick_index < len(self.nick_candidates) else DEFAULT_NICK
+        if event.source.nick != current_nick:
+            return
+
         print(f"IRC チャンネルに参加しました：{event.target}")
         # 参加したチャンネルが管理対象なら、起動メッセージを送信
         for irc_chan, d_id in CHANNEL_PAIRS:
