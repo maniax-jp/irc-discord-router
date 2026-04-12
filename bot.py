@@ -26,7 +26,7 @@ IRC_USER = os.getenv("IRC_USER")
 # チャンネルペアの設定 (形式: "#chan1:id1,#chan2:id2")
 CHANNEL_PAIRS_STR = os.getenv("CHANNEL_PAIRS", "")
 DEFAULT_NICK = os.getenv("IRC_NICK", "BOT_DISCORD")
-IRC_USER_REALNAME = "BOT_DISCORD"
+IRC_USER_REALNAME = "irc_discord_router"
 DISCORD_BOT_TOKEN = os.getenv("DISCORD_BOT_TOKEN")
 
 # チャンネルペアをパースしてリストに格納 [(irc_channel, discord_channel_id), ...]
@@ -41,19 +41,29 @@ class IRCClient(irc.bot.SingleServerIRCBot):
     """
     IRC サーバーへの接続とメッセージの送受信を管理するクラス。
     """
-    def __init__(self, bot, server, port, nickname):
-        super().__init__([(server, port)], nickname, "BOT_DISCORD")
-        self.bot = bot
+    def __init__(self, bot, server, port, nickname, realname):
         # NICK 候補を生成: B, BO, BOT, BOT_, BOT_D, ...
-        self.nick_candidates = [DEFAULT_NICK[:i] for i in range(1, len(DEFAULT_NICK) + 1)]
+        self.nick_candidates = [nickname[:i] for i in range(1, len(nickname) + 1)]
         self.current_nick_index = 0
+        self.current_nick = self.nick_candidates[self.current_nick_index]
+        super().__init__([(server, port)], self.current_nick, realname)
+        self.bot = bot
 
     def on_nicknameinuse(self, c, e):
         """ERR_NICKNAMEINUSE (433) の処理"""
         self.current_nick_index += 1
         if self.current_nick_index < len(self.nick_candidates):
+            # 第1段階: 前方一致
             new_nick = self.nick_candidates[self.current_nick_index]
             logger.info("[IRC] Nickname in use. Trying new nick: %s", new_nick)
+            self.current_nick = new_nick
+            c.nick(new_nick)
+        elif self.current_nick_index < len(self.nick_candidates) + 99:
+            # 第2段階: 数字付与
+            suffix = self.current_nick_index - len(self.nick_candidates) + 1
+            new_nick = f"{self.nick_candidates[-1]}{suffix}"
+            logger.info("[IRC] Nickname in use. Trying new nick: %s", new_nick)
+            self.current_nick = new_nick
             c.nick(new_nick)
         else:
             logger.error("[IRC] All nickname candidates exhausted.")
@@ -79,8 +89,7 @@ class IRCClient(irc.bot.SingleServerIRCBot):
         )
 
         # ボット自身の現在の Nick を無視
-        current_nick = self.nick_candidates[self.current_nick_index] if self.current_nick_index < len(self.nick_candidates) else DEFAULT_NICK
-        if sender_nick == current_nick:
+        if sender_nick == self.current_nick:
             logger.info("[無視] IRC ボット自身のメッセージを無視")
             return
 
@@ -115,8 +124,7 @@ class IRCClient(irc.bot.SingleServerIRCBot):
     def on_join(self, connection, event):
         """チャンネル参加時の処理"""
         # ボット自身の参加のみを処理
-        current_nick = self.nick_candidates[self.current_nick_index] if self.current_nick_index < len(self.nick_candidates) else DEFAULT_NICK
-        if event.source.nick != current_nick:
+        if event.source.nick != self.current_nick:
             return
 
         logger.info("IRC チャンネルに参加しました：%s", event.target)
@@ -132,7 +140,7 @@ class Bot:
     IRC と Discord 間でメッセージを双方向に転送するボット。
     """
     def __init__(self):
-        self.irc_client = IRCClient(self, IRC_SERVER, IRC_PORT, DEFAULT_NICK[:1])
+        self.irc_client = IRCClient(self, IRC_SERVER, IRC_PORT, DEFAULT_NICK, IRC_USER_REALNAME)
         self.discord_client = None
         self.discord_channel_map = {} # discord_id -> discord_channel_object
 
