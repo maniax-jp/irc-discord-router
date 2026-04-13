@@ -10,13 +10,25 @@ import subprocess
 import pytest
 import irc.client
 import irc.bot
+import discord
 from unittest.mock import MagicMock, patch, AsyncMock
-from bot import Bot, IRCClient, DEFAULT_NICK, IRC_SERVER as ORIGINAL_SERVER, IRC_PORT as ORIGINAL_PORT
+from bot import Bot, IRCClient, DEFAULT_NICK, IRC_SERVER as ORIGINAL_SERVER, IRC_PORT as ORIGINAL_PORT, parse_channel_pairs
 
 # テスト用の設定
 TEST_IRC_SERVER = "localhost"
 TEST_IRC_PORT = 6667
 TEST_CHANNEL = "#test"
+
+class MockMessageable(discord.abc.Messageable):
+    """
+    Messageable インターフェースを模倣するモッククラス。
+    isinstance(obj, discord.abc.Messageable) を True にしつつ、
+    send メソッドを AsyncMock にすることで検証を可能にする。
+    """
+    def __init__(self):
+        self.send = AsyncMock()
+
+
 
 class IRCServerManager:
     """ngircd コンテナを管理するクラス"""
@@ -53,7 +65,9 @@ class TestBot:
     @pytest.fixture
     def bot(self):
         """Bot インスタンスのフィクスチャ"""
-        return Bot()
+        b = Bot()
+        b.loop = asyncio.get_event_loop()
+        return b
 
     @pytest.fixture
     def mock_bot(self, bot):
@@ -83,7 +97,7 @@ class TestBot:
         """IRC から Discord へのメッセージ転送テスト"""
         assert mock_discord_client is not None
         with patch("bot.CHANNEL_PAIRS", [("#test-irc", "111")]):
-            mock_channel = AsyncMock()
+            mock_channel = MockMessageable()
             bot.discord_channel_map["111"] = mock_channel
 
             event = MagicMock()
@@ -117,7 +131,7 @@ class TestBot:
     def test_irc_bot_message_exclusion(self, bot, mock_irc_connection):
         """IRC ボット自身のメッセージ除外テスト"""
         with patch("bot.CHANNEL_PAIRS", [("#test-irc", "111")]):
-            mock_channel = AsyncMock()
+            mock_channel = MockMessageable()
             bot.discord_channel_map["111"] = mock_channel
 
             bot.irc_client.current_nick = "BotNick"
@@ -225,6 +239,90 @@ class TestBot:
             mock_conn.join.assert_any_call(TEST_CHANNEL)
             mock_conn.join.assert_any_call("#other")
             assert mock_conn.join.call_count == 2
+
+    def test_parse_channel_pairs_malformed(self):
+        """
+        不正な形式のチャンネルペア文字列が正しく処理され、有効なものだけが抽出されることを検証する
+        """
+        malformed_str = "#chan1:111,invalid_pair,#chan2:222,:333,444:"
+        result = parse_channel_pairs(malformed_str)
+        assert result == [("#chan1", "111"), ("#chan2", "222")]
+
+    def test_discord_invalid_id_handling(self, bot, mock_discord_client, mock_irc_connection):
+        """
+        Discord チャンネル ID が数値でない場合に、エラーログを出力して適切に無視されることを検証する
+        """
+        with patch("bot.CHANNEL_PAIRS", [("#test-irc", "invalid_id")]):
+            event = MagicMock()
+            event.target = "#test-irc"
+            event.arguments = ["Hello"]
+            event.source.nick = "Alice"
+            bot.irc_client.current_nick = "BotNick"
+
+            # 実行しても例外が発生せず、正常に終了することを確認
+            bot.irc_client.on_pubmsg(mock_irc_connection, event)
+            assert "invalid_id" not in bot.discord_channel_map
+
+    def test_channel_pair_independence(self, bot, mock_discord_client, mock_irc_connection):
+        """
+        複数のチャンネルペアが互いに干渉せず、正しく転送されることを検証する
+        """
+        with patch("bot.CHANNEL_PAIRS", [("#irc1", "111"), ("#irc2", "222")]):
+            mock_channel_111 = MockMessageable()
+            mock_channel_222 = MockMessageable()
+            bot.discord_channel_map["111"] = mock_channel_111
+            bot.discord_channel_map["222"] = mock_channel_222
+
+            # #irc1 へのメッセージをシミュレート
+            event1 = MagicMock()
+            event1.target = "#irc1"
+            event1.arguments = ["Msg 1"]
+            event1.source.nick = "Alice"
+            bot.irc_client.current_nick = "BotNick"
+            bot.irc_client.on_pubmsg(mock_irc_connection, event1)
+
+            mock_channel_111.send.assert_called()
+            mock_channel_222.send.assert_not_called()
+
+            # #irc2 へのメッセージをシミュレート
+            event2 = MagicMock()
+            event2.target = "#irc2"
+            event2.arguments = ["Msg 2"]
+            event2.source.nick = "Bob"
+            bot.irc_client.on_pubmsg(mock_irc_connection, event2)
+
+            mock_channel_222.send.assert_called()
+
+    def test_discord_send_failure_logging(self, bot, mock_discord_client, mock_irc_connection):
+        """
+        Discord 送信に失敗した際に、_handle_discord_send_result が正しくエラーをログ出力することを検証する
+        """
+        with patch("bot.CHANNEL_PAIRS", [("#test-irc", "111")]):
+            mock_channel = MockMessageable()
+            # send が例外を投げるように設定
+            mock_channel.send.side_effect = Exception("API Error")
+            bot.discord_channel_map["111"] = mock_channel
+
+            event = MagicMock()
+            event.target = "#test-irc"
+            event.arguments = ["Hello"]
+            event.source.nick = "Alice"
+            bot.irc_client.current_nick = "BotNick"
+
+            with patch("bot.logger.error") as mock_log:
+                bot.irc_client.on_pubmsg(mock_irc_connection, event)
+                # asyncio.run_coroutine_threadsafe は即座に Future を返すため、
+                # 実際にコールバックが呼ばれるまで待つか、手動でコールバックを呼ぶ必要がある。
+                # ここではBot._handle_discord_send_result を直接テストする。
+
+                future = MagicMock()
+                future.result.side_effect = Exception("API Error")
+                bot._handle_discord_send_result(future)
+
+                mock_log.assert_called()
+                # ログメッセージに "Discord へのメッセージ送信に失敗しました" が含まれているか確認
+                args, _ = mock_log.call_args
+                assert "Discord へのメッセージ送信に失敗しました" in args[0]
 
 if __name__ == "__main__":
     pytest.main()
