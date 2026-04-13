@@ -240,8 +240,12 @@ class Bot:
         """Discord 送信結果を処理し、失敗した場合はログに出力する"""
         try:
             future.result()
+        except discord.Forbidden:
+            logger.error("[エラー] Discord チャンネルへの送信権限がありません。")
+        except discord.HTTPException as e:
+            logger.error("[エラー] Discord API エラーが発生しました: %s", e)
         except Exception as e:
-            logger.error("[エラー] Discord へのメッセージ送信に失敗しました: %s", e, exc_info=True)
+            logger.error("[エラー] Discord へのメッセージ送信中に予期せぬエラーが発生しました: %s", e, exc_info=True)
 
     def run_irc_reactor(self) -> None:
         """IRC リアクターを別スレッドで実行する"""

@@ -320,9 +320,50 @@ class TestBot:
                 bot._handle_discord_send_result(future)
 
                 mock_log.assert_called()
-                # ログメッセージに "Discord へのメッセージ送信に失敗しました" が含まれているか確認
+                # ログメッセージに "予期せぬエラーが発生しました" が含まれているか確認
                 args, _ = mock_log.call_args
-                assert "Discord へのメッセージ送信に失敗しました" in args[0]
+                assert "予期せぬエラーが発生しました" in args[0]
+
+    def test_discord_send_specific_errors(self, bot):
+        """
+        Discord 送信時の具体的なエラー (Forbidden, HTTPException) が正しくログ出力されることを検証する
+        """
+        with patch("bot.logger.error") as mock_log:
+            # 1. discord.Forbidden のケース
+            future_forbidden = MagicMock()
+            future_forbidden.result.side_effect = discord.Forbidden(MagicMock(), "No permission")
+            bot._handle_discord_send_result(future_forbidden)
+
+            args_forbidden, _ = mock_log.call_args
+            assert "Discord チャンネルへの送信権限がありません" in args_forbidden[0]
+
+            # 2. discord.HTTPException のケース
+            future_http = MagicMock()
+            future_http.result.side_effect = discord.HTTPException(MagicMock(), "HTTP Error")
+            bot._handle_discord_send_result(future_http)
+
+            args_http, _ = mock_log.call_args
+            assert "Discord API エラーが発生しました" in args_http[0]
+
+            # 3. その他の予期せぬエラーのケース
+            future_generic = MagicMock()
+            future_generic.result.side_effect = RuntimeError("Unexpected error")
+            bot._handle_discord_send_result(future_generic)
+
+            args_generic, _ = mock_log.call_args
+            assert "予期せぬエラーが発生しました" in args_generic[0]
+
+    def test_on_ready_invalid_id_handling(self, bot, mock_discord_client):
+        """
+        on_ready 時に Discord チャンネル ID が数値でない場合に、適切に無視されることを検証する
+        """
+        with patch("bot.CHANNEL_PAIRS", [("#test-irc", "invalid_id")]):
+            # mock_discord_client は既にセットアップ済み
+            loop = asyncio.get_event_loop()
+            loop.run_until_complete(bot.on_ready())
+
+            assert "invalid_id" not in bot.discord_channel_map
+
 
 if __name__ == "__main__":
     pytest.main()
