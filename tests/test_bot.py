@@ -96,7 +96,8 @@ class TestBot:
     def test_irc_to_discord_forward(self, bot, mock_discord_client, mock_irc_connection):
         """IRC から Discord へのメッセージ転送テスト"""
         assert mock_discord_client is not None
-        with patch("bot.CHANNEL_PAIRS", [("#test-irc", "111")]):
+        with patch("bot.CHANNEL_PAIRS", [("#test-irc", "111")]), \
+             patch("asyncio.run_coroutine_threadsafe", side_effect=lambda coro, loop: loop.run_until_complete(coro)):
             mock_channel = MockMessageable()
             bot.discord_channel_map["111"] = mock_channel
 
@@ -267,7 +268,8 @@ class TestBot:
         """
         複数のチャンネルペアが互いに干渉せず、正しく転送されることを検証する
         """
-        with patch("bot.CHANNEL_PAIRS", [("#irc1", "111"), ("#irc2", "222")]):
+        with patch("bot.CHANNEL_PAIRS", [("#irc1", "111"), ("#irc2", "222")]), \
+             patch("asyncio.run_coroutine_threadsafe", side_effect=lambda coro, loop: loop.run_until_complete(coro)):
             mock_channel_111 = MockMessageable()
             mock_channel_222 = MockMessageable()
             bot.discord_channel_map["111"] = mock_channel_111
@@ -295,63 +297,48 @@ class TestBot:
 
     def test_discord_send_failure_logging(self, bot, mock_discord_client, mock_irc_connection):
         """
-        Discord 送信に失敗した際に、_handle_discord_send_result が正しくエラーをログ出力することを検証する
+        Discord 送信に失敗した際に、正しくエラーをログ出力することを検証する
         """
-        with patch("bot.CHANNEL_PAIRS", [("#test-irc", "111")]):
+        with patch("bot.CHANNEL_PAIRS", [("#test-irc", "111")]), \
+             patch("asyncio.sleep", return_value=None), \
+             patch("bot.logger.error") as mock_log:
             mock_channel = MockMessageable()
             # send が例外を投げるように設定
             mock_channel.send.side_effect = Exception("API Error")
             bot.discord_channel_map["111"] = mock_channel
 
-            event = MagicMock()
-            event.target = "#test-irc"
-            event.arguments = ["Hello"]
-            event.source.nick = "Alice"
-            bot.irc_client.current_nick = "BotNick"
+            # 直接 send_discord_message_with_retry を呼び出して検証
+            bot.loop.run_until_complete(bot.send_discord_message_with_retry(mock_channel, "Hello"))
 
-            with patch("bot.logger.error") as mock_log:
-                bot.irc_client.on_pubmsg(mock_irc_connection, event)
-                # asyncio.run_coroutine_threadsafe は即座に Future を返すため、
-                # 実際にコールバックが呼ばれるまで待つか、手動でコールバックを呼ぶ必要がある。
-                # ここではBot._handle_discord_send_result を直接テストする。
-
-                future = MagicMock()
-                future.result.side_effect = Exception("API Error")
-                bot._handle_discord_send_result(future)
-
-                mock_log.assert_called()
-                # ログメッセージに "予期せぬエラーが発生しました" が含まれているか確認
-                args, _ = mock_log.call_args
-                assert "予期せぬエラーが発生しました" in args[0]
+            mock_log.assert_called()
+            args, _ = mock_log.call_args
+            assert "Discord へのメッセージ送信に失敗しました" in args[0]
 
     def test_discord_send_specific_errors(self, bot):
         """
         Discord 送信時の具体的なエラー (Forbidden, HTTPException) が正しくログ出力されることを検証する
         """
-        with patch("bot.logger.error") as mock_log:
-            # 1. discord.Forbidden のケース
-            future_forbidden = MagicMock()
-            future_forbidden.result.side_effect = discord.Forbidden(MagicMock(), "No permission")
-            bot._handle_discord_send_result(future_forbidden)
+        with patch("asyncio.sleep", return_value=None), \
+             patch("bot.logger.error") as mock_log:
+            mock_channel = MockMessageable()
 
+            # 1. discord.Forbidden のケース
+            mock_channel.send.side_effect = discord.Forbidden(MagicMock(), "No permission")
+            bot.loop.run_until_complete(bot.send_discord_message_with_retry(mock_channel, "Hello"))
             args_forbidden, _ = mock_log.call_args
             assert "Discord チャンネルへの送信権限がありません" in args_forbidden[0]
 
             # 2. discord.HTTPException のケース
-            future_http = MagicMock()
-            future_http.result.side_effect = discord.HTTPException(MagicMock(), "HTTP Error")
-            bot._handle_discord_send_result(future_http)
-
+            mock_channel.send.side_effect = discord.HTTPException(MagicMock(), "HTTP Error")
+            bot.loop.run_until_complete(bot.send_discord_message_with_retry(mock_channel, "Hello"))
             args_http, _ = mock_log.call_args
-            assert "Discord API エラーが発生しました" in args_http[0]
+            assert "Discord へのメッセージ送信に失敗しました" in args_http[0]
 
             # 3. その他の予期せぬエラーのケース
-            future_generic = MagicMock()
-            future_generic.result.side_effect = RuntimeError("Unexpected error")
-            bot._handle_discord_send_result(future_generic)
-
+            mock_channel.send.side_effect = RuntimeError("Unexpected error")
+            bot.loop.run_until_complete(bot.send_discord_message_with_retry(mock_channel, "Hello"))
             args_generic, _ = mock_log.call_args
-            assert "予期せぬエラーが発生しました" in args_generic[0]
+            assert "Discord へのメッセージ送信に失敗しました" in args_generic[0]
 
     def test_on_ready_invalid_id_handling(self, bot, mock_discord_client):
         """
