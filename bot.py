@@ -138,11 +138,10 @@ class IRCClient(irc.bot.SingleServerIRCBot):
                 # Discord 側に転送
                 logger.info("[転送] IRC → Discord：%s", message_content)
                 if self.bot.loop:
-                    future = asyncio.run_coroutine_threadsafe(
-                        channel.send(f"{sender_nick}: {message_content}"),
+                    asyncio.run_coroutine_threadsafe(
+                        self.bot.send_discord_message_with_retry(channel, f"{sender_nick}: {message_content}"),
                         self.bot.loop
                     )
-                    future.add_done_callback(self.bot._handle_discord_send_result)
                 else:
                     logger.error("Discord イベントループが準備できていないため、転送に失敗しました")
             elif channel:
@@ -236,16 +235,27 @@ class Bot:
         else:
             logger.error("IRC 接続が確立されていないため、転送に失敗しました")
 
-    def _handle_discord_send_result(self, future: Future) -> None:
-        """Discord 送信結果を処理し、失敗した場合はログに出力する"""
+    async def send_discord_message_with_retry(self, channel: discord.abc.Messageable, content: str, attempt: int = 0) -> None:
+        """Discord メッセージをリトライ付きで送信する"""
+        retry_intervals = [10, 20, 30]
         try:
-            future.result()
+            await channel.send(content)
         except discord.Forbidden:
             logger.error("[エラー] Discord チャンネルへの送信権限がありません。")
-        except discord.HTTPException as e:
-            logger.error("[エラー] Discord API エラーが発生しました: %s", e)
-        except Exception as e:
-            logger.error("[エラー] Discord へのメッセージ送信中に予期せぬエラーが発生しました: %s", e, exc_info=True)
+        except (discord.HTTPException, Exception) as e:
+            if attempt < len(retry_intervals):
+                delay = retry_intervals[attempt]
+                logger.warning(
+                    "[リトライ] Discord 送信に失敗しました。%d回目を %d 秒後にリトライします: %s",
+                    attempt + 1, delay, e
+                )
+                await asyncio.sleep(delay)
+                await self.send_discord_message_with_retry(channel, content, attempt + 1)
+            else:
+                logger.error(
+                    "[エラー] Discord へのメッセージ送信に失敗しました。最大リトライ回数に達しました: %s",
+                    e, exc_info=True
+                )
 
     def run_irc_reactor(self) -> None:
         """IRC リアクターを別スレッドで実行する"""
