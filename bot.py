@@ -227,10 +227,18 @@ class Bot:
             return
 
         # IRC 側に転送
-        logger.info("[転送] Discord → IRC：%s", message.content)
+        # 空でないパーツ（本文と添付ファイルURL）を収集して結合
+        parts = []
+        if message.content:
+            parts.append(message.content)
+        if message.attachments:
+            parts.extend([attachment.url for attachment in message.attachments])
+        content = " ".join(parts)
+
+        logger.info("[転送] Discord → IRC：%s", content)
         if self.irc_client.connection:
             self.irc_client.connection.privmsg(
-                irc_chan, f"{message.author.display_name}: {message.content}"
+                irc_chan, f"{message.author.display_name}: {content}"
             )
         else:
             logger.error("IRC 接続が確立されていないため、転送に失敗しました")
