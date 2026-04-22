@@ -10,6 +10,7 @@ import asyncio
 import logging
 import threading
 import os
+import re
 from typing import List, Tuple, Dict, Optional, Any
 from concurrent.futures import Future
 import discord
@@ -48,6 +49,56 @@ def parse_channel_pairs(pairs_str: str) -> List[Tuple[str, str]]:
             else:
                 logger.warning("[設定] 不正な形式のチャンネルペアを無視しました: %s", pair)
     return pairs
+
+
+def convert_discord_to_irc_format(text: str) -> str:
+    """Discord の太字・斜体フォーマットを IRC の制御コードに変換する"""
+    if not text:
+        return text
+
+    # 1. 太字のペアを変換 (**text** -> \x02text\x02)
+    text = re.sub(r'\*\*([^\*].*?)\*\*', r'\x02\1\x02', text)
+
+    # 2. 斜体のペアを変換 (*text* -> \x1Dtext\x1D)
+    text = re.sub(r'\*([^\*].*?)\*', r'\x1D\1\x1D', text)
+
+    return text
+
+
+def convert_irc_to_discord_format(text: str) -> str:
+    """IRC の制御コードを Discord の太字・斜体フォーマットに変換する"""
+    if not text:
+        return text
+
+    res = []
+    bold = False
+    italic = False
+
+    for char in text:
+        if char == '\x02':
+            res.append('**')
+            bold = not bold
+        elif char == '\x1D':
+            res.append('*')
+            italic = not italic
+        elif char == '\x0F':
+            if bold:
+                res.append('**')
+                bold = False
+            if italic:
+                res.append('*')
+                italic = False
+        else:
+            res.append(char)
+
+    # 行末で閉じられていないフォーマットを閉じる
+    if bold:
+        res.append('**')
+    if italic:
+        res.append('*')
+
+    return "".join(res)
+
 
 CHANNEL_PAIRS = parse_channel_pairs(CHANNEL_PAIRS_STR)
 if CHANNEL_PAIRS_STR and not CHANNEL_PAIRS:
@@ -139,7 +190,7 @@ class IRCClient(irc.bot.SingleServerIRCBot):
                 logger.info("[転送] IRC → Discord：%s", message_content)
                 if self.bot.loop:
                     asyncio.run_coroutine_threadsafe(
-                        self.bot.send_discord_message_with_retry(channel, f"{sender_nick}: {message_content}"),
+                        self.bot.send_discord_message_with_retry(channel, f"{sender_nick}: {convert_irc_to_discord_format(message_content)}"),
                         self.bot.loop
                     )
                 else:
@@ -230,7 +281,7 @@ class Bot:
         # 空でないパーツ（本文と添付ファイルURL）を収集して結合
         parts = []
         if message.content:
-            parts.append(message.content)
+            parts.append(convert_discord_to_irc_format(message.content))
         if message.attachments:
             parts.extend([attachment.url for attachment in message.attachments])
         content = " ".join(parts)
