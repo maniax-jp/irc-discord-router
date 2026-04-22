@@ -57,10 +57,10 @@ def convert_discord_to_irc_format(text: str) -> str:
         return text
 
     # 1. 太字のペアを変換 (**text** -> \x02text\x02)
-    text = re.sub(r'\*\*([^\*].*?)\*\*', r'\x02\1\x02', text)
+    text = re.sub(r'\*\*([^\*].*?)\*\*', '\x02\\1\x02', text)
 
     # 2. 斜体のペアを変換 (*text* -> \x1Dtext\x1D)
-    text = re.sub(r'\*([^\*].*?)\*', r'\x1D\1\x1D', text)
+    text = re.sub(r'\*([^\*].*?)\*', '\x1D\\1\x1D', text)
 
     return text
 
