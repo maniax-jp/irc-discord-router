@@ -52,50 +52,38 @@ def parse_channel_pairs(pairs_str: str) -> List[Tuple[str, str]]:
 
 
 def convert_discord_to_irc_format(text: str) -> str:
-    """Discord の太字・斜体フォーマットを IRC の制御コードに変換する"""
+    """Discord の太字フォーマットを IRC の制御コードに変換する"""
     if not text:
         return text
 
-    # 1. 太字のペアを変換 (**text** -> \x02text\x02)
+    # 太字のペアを変換 (**text** -> \x02text\x02)
     text = re.sub(r'\*\*([^\*].*?)\*\*', '\x02\\1\x02', text)
-
-    # 2. 斜体のペアを変換 (*text* -> \x1Dtext\x1D)
-    text = re.sub(r'\*([^\*].*?)\*', '\x1D\\1\x1D', text)
 
     return text
 
 
 def convert_irc_to_discord_format(text: str) -> str:
-    """IRC の制御コードを Discord の太字・斜体フォーマットに変換する"""
+    """IRC の制御コードを Discord の太字フォーマットに変換する"""
     if not text:
         return text
 
     res = []
     bold = False
-    italic = False
 
     for char in text:
         if char == '\x02':
             res.append('**')
             bold = not bold
-        elif char == '\x1D':
-            res.append('*')
-            italic = not italic
         elif char == '\x0F':
             if bold:
                 res.append('**')
                 bold = False
-            if italic:
-                res.append('*')
-                italic = False
         else:
             res.append(char)
 
     # 行末で閉じられていないフォーマットを閉じる
     if bold:
         res.append('**')
-    if italic:
-        res.append('*')
 
     return "".join(res)
 
