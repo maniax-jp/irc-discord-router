@@ -276,9 +276,11 @@ class Bot:
 
         logger.info("[転送] Discord → IRC：%s", content)
         if self.irc_client.connection:
-            self.irc_client.connection.privmsg(
-                irc_chan, f"{message.author.display_name}: {content}"
-            )
+            for line in content.splitlines():
+                if line:
+                    self.irc_client.connection.privmsg(
+                        irc_chan, f"{message.author.display_name}: {line}"
+                    )
         else:
             logger.error("IRC 接続が確立されていないため、転送に失敗しました")
 
